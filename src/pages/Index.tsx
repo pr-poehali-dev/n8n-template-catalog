@@ -1,10 +1,14 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import Icon from '@/components/ui/icon';
+import { useAuth } from '@/contexts/AuthContext';
+import { AuthDialog } from '@/components/AuthDialog';
+import { useToast } from '@/hooks/use-toast';
 
 interface Template {
   id: number;
@@ -16,9 +20,10 @@ interface Template {
   icon: string;
   tags: string[];
   complexity: 'easy' | 'medium' | 'hard';
+  saved?: boolean;
 }
 
-const templates: Template[] = [
+const staticTemplates: Template[] = [
   {
     id: 1,
     title: 'Автоматизация Email-маркетинга',
@@ -115,6 +120,66 @@ export default function Index() {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('Все');
   const [sortBy, setSortBy] = useState<'rating' | 'reviews'>('rating');
+  const [templates, setTemplates] = useState<Template[]>(staticTemplates);
+  const [authDialogOpen, setAuthDialogOpen] = useState(false);
+  const { user, isAuthenticated } = useAuth();
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
+  useEffect(() => {
+    fetchTemplates();
+  }, [user]);
+
+  const fetchTemplates = async () => {
+    try {
+      const headers: HeadersInit = {};
+      if (user) {
+        headers['X-User-Id'] = user.id.toString();
+      }
+
+      const response = await fetch('https://functions.poehali.dev/3c229f16-9ba3-4b37-9e96-de4aaddee3da', { headers });
+      const data = await response.json();
+      setTemplates(data.templates);
+    } catch (error) {
+      setTemplates(staticTemplates);
+    }
+  };
+
+  const handleSaveTemplate = async (templateId: number) => {
+    if (!isAuthenticated) {
+      setAuthDialogOpen(true);
+      return;
+    }
+
+    try {
+      const template = templates.find(t => t.id === templateId);
+      const action = template?.saved ? 'unsave' : 'save';
+
+      await fetch('https://functions.poehali.dev/3c229f16-9ba3-4b37-9e96-de4aaddee3da', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Id': user?.id.toString() || ''
+        },
+        body: JSON.stringify({ action, template_id: templateId })
+      });
+
+      setTemplates(prev => prev.map(t => 
+        t.id === templateId ? { ...t, saved: !t.saved } : t
+      ));
+
+      toast({
+        title: template?.saved ? 'Удалено из избранного' : 'Добавлено в избранное',
+        description: template?.saved ? 'Шаблон удален' : 'Шаблон сохранен',
+      });
+    } catch (error) {
+      toast({
+        title: 'Ошибка',
+        description: 'Не удалось сохранить шаблон',
+        variant: 'destructive',
+      });
+    }
+  };
 
   const filteredTemplates = templates
     .filter(template => {
@@ -140,6 +205,38 @@ export default function Index() {
 
   return (
     <div className="min-h-screen bg-background">
+      <AuthDialog open={authDialogOpen} onOpenChange={setAuthDialogOpen} />
+      
+      <nav className="border-b border-border glass-effect sticky top-0 z-50">
+        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Icon name="Workflow" size={24} className="text-primary" />
+            </div>
+            <h1 className="text-2xl font-bold text-gradient">n8n Каталог</h1>
+          </div>
+          <div className="flex items-center gap-4">
+            {isAuthenticated ? (
+              <>
+                <Button variant="ghost" onClick={() => navigate('/dashboard')}>
+                  <Icon name="LayoutDashboard" size={18} className="mr-2" />
+                  Личный кабинет
+                </Button>
+                <div className="flex items-center gap-3 px-4 py-2 glass-effect rounded-lg">
+                  <Icon name="User" size={18} className="text-primary" />
+                  <span className="font-medium">{user?.full_name || user?.email}</span>
+                </div>
+              </>
+            ) : (
+              <Button onClick={() => setAuthDialogOpen(true)}>
+                <Icon name="LogIn" size={18} className="mr-2" />
+                Войти
+              </Button>
+            )}
+          </div>
+        </div>
+      </nav>
+
       <div className="relative overflow-hidden">
         <div className="absolute inset-0 gradient-purple-blue opacity-20"></div>
         <div className="absolute top-20 left-10 w-72 h-72 bg-primary/30 rounded-full blur-3xl animate-float"></div>
@@ -242,9 +339,19 @@ export default function Index() {
                       <span className="font-semibold">{template.rating}</span>
                       <span className="text-muted-foreground text-sm">({template.reviews})</span>
                     </div>
-                    <Button size="sm" variant="ghost" className="group-hover:bg-primary group-hover:text-primary-foreground">
-                      <Icon name="Download" size={16} />
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        onClick={() => handleSaveTemplate(template.id)}
+                        className={template.saved ? 'text-primary' : ''}
+                      >
+                        <Icon name={template.saved ? 'BookmarkCheck' : 'Bookmark'} size={16} />
+                      </Button>
+                      <Button size="sm" variant="ghost" className="group-hover:bg-primary group-hover:text-primary-foreground">
+                        <Icon name="Download" size={16} />
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
